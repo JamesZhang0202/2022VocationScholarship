@@ -1,0 +1,313 @@
+---
+title: "Simulation"
+output: html_document
+author: Jiacheng Zhang
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Read the Data
+```{r}
+cases <- read.csv(file = 'Output_Data/case_clean.csv')
+hosp <- read.csv(file = "Output_data/hosp_clean.csv")
+icu_states <- read.csv(file = "Output_data/icu_clean.csv")
+daily_death <- read.csv(file = "Output_data/daily_death.csv")
+input <- cases$NSW
+```
+
+# Initialization
+```{r}
+n_days = 300
+
+# bed occupancy of general wards
+ward_list <- as.list(rep(NA, length(input)))
+pre_ICU_list <- as.list(rep(NA, length(input)))
+ICU_list <- as.list(rep(NA, length(input)))
+post_ICU_list <- as.list(rep(NA), length(input))
+
+ward_death_list <- as.list(rep(NA), length(input))
+ICU_death_list <- as.list(rep(NA), length(input))
+post_ICU_death_list <- as.list(rep(NA), length(input))
+```
+
+# Parameter Set Up
+```{r}
+# Estimate the probability of getting into the hospital from general cases
+P_hosp = 0.75
+
+# Estimate the probability of getting into the Pre-ICU from general wards
+P_ICU_pre = 0.24
+
+# Estimate the probability of death in general ward
+P_Hd = 0.46
+
+# Estimate the probability of death in ICU
+P_ICUd = 0.67
+
+# Estimate the probability of death in post-ICU
+P_ICU_Postd = 0.35
+
+# the Erlang distribution is a special case of the Gamma distribution. 
+# Sampling from the gamma distribution is implemented in the stats package.
+
+# rgamma(n, shape=k, rate = lambda)
+
+# estimated time (in days) that people will die from general ward
+k_wd = 2 # shape parameter
+l_wd = 0.30 # rate
+
+# estimated time (in days) that people will be discharged from general ward
+k_wr = 1
+l_wr = 0.18
+
+# estimated time (in days) that people will move to ICU from pre-ICU
+k_icu = 1
+l_icu = 0.50
+
+# estimated time (in days) that people will die in the ICU
+k_icud = 2
+l_icud = 0.35
+
+# estimated time (in days) that people will move from ICU to post-ICU (Assume ICUwr = ICUwd)
+k_icuw = 1
+l_icuw = 0.25
+
+# estimated time (in days) that people will die in post-ICU
+k_icupd = 1
+l_icupd = 0.2
+
+# estimated time (in days) that people will be discharged in post-ICU
+k_icupr = 2
+l_icupr = 0.16
+```
+
+# Simulation of General Wards (Upper Part of the Model)
+```{r}
+for(i in 1:length(input)){
+  # bed occupancy of general wards
+  ward <- replicate(n_days, 0)
+  ward_d <- replicate(n_days, 0)
+  
+  ward[i] <- rbinom(1, input[i], P_hosp*(1-P_ICU_pre))
+
+  ward[i:n_days] = ward[i]
+
+  if(ward[i] != 0){
+    
+    # number of death/discharge in general ward
+    ward_death <- rbinom(1, ward[i], P_Hd)
+    ward_discharge <- ward[i] - ward_death
+    
+    # round to the nearest integer
+    ward_death_delay <- round(rgamma(ward_death, shape=k_wd, rate = l_wd))
+    ward_discharge_delay <- round(rgamma(ward_discharge, shape=k_wr, rate = l_wr))
+    
+    for(day in ward_death_delay){
+      ward_d[i+day+1] = ward_d[i+day+1] + 1
+    }
+      
+    one_day_ward_decrease = sort(append(ward_death_delay,ward_discharge_delay))
+  
+    for(j in 1:length(one_day_ward_decrease)){
+      day = one_day_ward_decrease[j]
+      if(ward[i+day+1] > 0){
+        ward[i+day+1] = ward[i+day+1] - 1
+        ward[i+day+1:n_days] = ward[i+day+1]
+      }
+    }
+  }
+  ward_list[[i]] = ward[1:n_days]
+  ward_death_list[[i]] = ward_d[1:n_days]
+}
+
+general_ward_simulation_result = Reduce("+", ward_list)
+general_ward_death_simulation = Reduce("+", ward_death_list)
+```
+
+# Simulation of Pre-ICU, ICU, Post-ICU (Lower Part of the Model)
+```{r}
+for(i in 1:length(input)){
+  icu_pre <- replicate(n_days, 0)
+  icu <- replicate(n_days, 0)
+  icu_post <- replicate(n_days, 0)
+  
+  icu_d <- replicate(n_days, 0)
+  icu_post_d <- replicate(n_days, 0)
+  
+  icu_pre[i] <- rbinom(1, input[i], P_hosp*P_ICU_pre)
+  icu_pre[i:n_days] = icu_pre[i]
+
+  if(icu_pre[i] != 0){
+    icu_delay <- round(rgamma(icu_pre[i], shape = k_icu, rate = l_icu))
+    
+    for(j in 1:length(icu_delay)){
+      day = sort(icu_delay)[j]
+      if(icu_pre[i+day+1] > 0){
+        icu_pre[i+day+1] = icu_pre[i+day+1] - 1
+        icu_pre[i+day+1:n_days] = icu_pre[i+day+1]
+        location = i+day+1
+      }
+    }
+    
+    # increase in ICU
+    for(j in 1:length(icu_delay)){
+      day = sort(icu_delay)[j]
+      icu[i+day+1] = icu[i+day+1] + 1
+      icu[i+day+1:location] = icu[i+day+1]
+    }
+    
+     # decrease in ICU
+    if(icu[location] != 0){
+      icu_death = rbinom(1,icu[location],P_ICUd)
+      # round to the nearest integer
+      icu_death_delay <- round(rgamma(icu_death, shape = k_icud, rate = l_icud))
+  
+      for(day in icu_death_delay){
+        icu_d[i+day+1] = icu_d[i+day+1] + 1
+      }
+      
+      # The number of patients that will eventually go to the post-ICU
+      icu_post_case = icu[location] - icu_death
+      icu_post_delay <- round(rgamma(icu_post_case, shape = k_icuw, rate = l_icuw))
+      one_day_icu_decrease = sort(append(icu_death_delay,icu_post_delay))
+  
+      for(j in 1:length(one_day_icu_decrease)){
+        day = sort(one_day_icu_decrease)[j]
+        if(icu[location+day+1] > 0){
+          icu[location+day+1] = icu[location+day+1] - 1
+          icu[location+day+1:n_days] = icu[location+day+1]
+          new_location = location+day+1
+        }else{
+          new_location = 0
+        }
+      }
+      
+      # increase in post-ICU
+      if(icu_post_case != 0 && new_location != 0){
+        for(j in 1:length(icu_post_delay)){
+          day = sort(icu_post_delay)[j]
+          icu_post[location+day+1] = icu_post[location+day+1] + 1
+          icu_post[location+day+1:n_days] = icu_post[location+day+1]
+        }
+        icu_post_death = rbinom(1, icu_post_case, P_ICU_Postd)
+        icu_post_discharge = icu_post_case - icu_post_death
+
+        # round to the nearest integer
+        icu_post_death_delay <- round(rgamma(icu_post_death, shape = k_icupd, rate = l_icupd))
+        
+        for(day in icu_post_death_delay){
+          icu_post_d[new_location+day+1] = icu_post_d[new_location+day+1] + 1
+        }
+        
+        icu_post_discharge_delay <- round(rgamma(icu_post_discharge, shape = k_icupr, rate = l_icupr))
+
+        one_day_icu_post_decrease = sort(append(icu_post_death_delay,icu_post_discharge_delay))
+
+        for(j in 1:length(one_day_icu_post_decrease)){
+          day = sort(one_day_icu_post_decrease)[j]
+          if(icu_post[new_location+day+1] > 0){
+            icu_post[new_location+day+1] = icu_post[new_location+day+1] - 1
+            icu_post[new_location+day+1:n_days] = icu_post[new_location+day+1]
+          }
+        }
+      }
+    }
+  }
+  pre_ICU_list[[i]] = icu_pre[1:n_days]
+  ICU_list[[i]] = icu[1:n_days]
+  post_ICU_list[[i]] = icu_post[1:n_days]
+  
+  ICU_death_list[[i]] = icu_d[1:n_days]
+  post_ICU_death_list[[i]] = icu_post_d[1:n_days]
+}
+```
+
+
+# Generate simulation results
+```{r}
+pre_ICU_simulation_result = Reduce("+", pre_ICU_list)
+ICU_simulation_result = Reduce("+",ICU_list)
+post_ICU_simulation_result = Reduce("+", post_ICU_list)
+
+ICU_death_simulation = Reduce("+",ICU_death_list)
+post_ICU_death_simulation = Reduce("+", post_ICU_death_list)
+
+hosp_simulation_result = 
+  general_ward_simulation_result +
+  pre_ICU_simulation_result +
+  ICU_simulation_result +
+  post_ICU_simulation_result
+
+
+Death = 
+  general_ward_death_simulation + 
+  ICU_death_simulation + 
+  post_ICU_death_simulation
+```
+
+
+# Visualization
+```{r}
+library(ggplot2)
+hosp$Date = as.Date(hosp$Date, format = c("%m-%d"))
+
+hosp_simulation <- data.frame(
+  date = hosp$Date,
+  sim = hosp_simulation_result[1:168]
+)
+
+hosp_occupancy <- ggplot() + 
+  geom_line(data = hosp_simulation, aes(x = date, y = sim, color="simulation")) +
+  geom_line(data = hosp, aes(x = Date, y = NSW, color="data")) +
+  scale_colour_manual("", 
+                      breaks = c("simulation", "data"),
+                      values = c("blue", "black")) +
+  labs(x = "Date (Year: 2021)", title = "Hospital Occupancy Simulation (without inference) in NSW") +
+  scale_y_continuous("Hospital Occupancy", limits = c(0,11000))
+```
+
+```{r}
+icu_states$Date = as.Date(icu_states$Date, format = c("%m-%d"))
+
+icu_simulation <- data.frame(
+  date = icu_states$Date,
+  sim = ICU_simulation_result[1:168]
+)
+
+icu_occupancy <- ggplot() + 
+  geom_line(data = icu_simulation, aes(x = date, y = sim, color="simulation")) +
+  geom_line(data = icu_states, aes(x = Date, y = NSW, color="data")) +
+  scale_colour_manual("", 
+                      breaks = c("simulation", "data"),
+                      values = c("blue", "black")) +
+  labs(x = "Date (Year: 2021)", title = "ICU Occupancy Simulation (without inference) in NSW") +
+  scale_y_continuous("ICU Occupancy", limits = c(0,4000))
+```
+
+```{r}
+daily_death$Date = as.Date(daily_death$Date, format = c("%m-%d"))
+
+death_simulation <- data.frame(
+  date = daily_death$Date,
+  sim = Death[1:168]
+)
+
+daily_death_plot <- ggplot() + 
+  geom_line(data = death_simulation, aes(x = date, y = sim, color="simulation")) +
+  geom_line(data = daily_death, aes(x = Date, y = NSW, color="data")) +
+  scale_colour_manual("", 
+                      breaks = c("simulation", "data"),
+                      values = c("blue", "black")) +
+  labs(x = "Date (Year: 2021)", title = "Daily Death Simulation (without inference) in NSW") +
+  scale_y_continuous("Daily Deaths", limits = c(0,600))
+```
+
+```{r}
+# install.packages("ggpubr")
+library(ggpubr)
+ggarrange(hosp_occupancy,icu_occupancy, daily_death_plot, 
+          ncol = 1, nrow = 3)
+ggsave("Plots/Simulation without inference in NSW.png")
+```
