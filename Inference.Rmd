@@ -65,7 +65,7 @@ l_icupr = 0.16
 
 ```{r}
 # Simulation of General Wards (Upper Part of the Model)
-ward_simulation <- function(P_hosp, P_ICU_pre, P_Hd){
+ward_simulation <- function(input, P_hosp, P_ICU_pre, P_Hd){
   for(i in 1:length(input)){
     # bed occupancy of general wards
     ward <- replicate(n_days, 0)
@@ -111,7 +111,7 @@ ward_simulation <- function(P_hosp, P_ICU_pre, P_Hd){
 
 ```{r}
 # Simulation of Pre-ICU, ICU, Post-ICU (Lower Part of the Model)
-icu_simulation <- function(P_ICUd, P_ICU_Postd){
+icu_simulation <- function(input, P_hosp, P_ICU_pre, P_ICUd, P_ICU_Postd){
   
   for(i in 1:length(input)){
     icu_pre <- replicate(n_days, 0)
@@ -231,7 +231,7 @@ ICU_epsilon = 60
 death_epsilon = 20
   
 # probability acceptance function
-ABC_acceptance <- function(par){
+ABC_acceptance <- function(input,par){
   
   # prior to avoid invalid probability
   if (par[1] <= 0 || par[1] > 1) return(F)
@@ -239,8 +239,8 @@ ABC_acceptance <- function(par){
   if(par[3] <= 0 || par[3] > 1) return(F)
   if(par[4] <= 0 || par[4] > 1) return(F)
   if(par[5] <= 0 || par[5] > 1) return(F)
-  ward_sim = ward_simulation(par[1], par[2], par[3])
-  icu_sim = icu_simulation(par[4],par[5])
+  ward_sim = ward_simulation(input, par[1], par[2], par[3])
+  icu_sim = icu_simulation(input, par[1], par[2], par[4], par[5])
   
   general_ward = ward_sim[[1]] + icu_sim[[2]] + icu_sim[[3]]
   death_result = ward_sim[[2]] + icu_sim[[4]] + icu_sim[[5]]
@@ -257,7 +257,7 @@ ABC_acceptance <- function(par){
 
 
 # ABC rejection sampling
-run_ABC <- function(startvalue, iterations){
+run_ABC <- function(input, startvalue, iterations){
   chain = array(dim = c(iterations+1,5))
   chain[1,] = startvalue
     
@@ -266,7 +266,7 @@ run_ABC <- function(startvalue, iterations){
       # generate samples from prior distribution
       prior = rnorm(5, mean = chain[i,], sd= c(0.1,0.1,0.1, 0.1, 0.1))
       
-      if(ABC_acceptance(prior)){
+      if(ABC_acceptance(input, prior)){
           chain[i+1,] = prior
       }else{
           chain[i+1,] = chain[i,]
@@ -295,121 +295,21 @@ P_ICU_Postd = 0.1
 
 # Run ABC algorithm
 ```{r}
-num_iter = 10000
+num_iter = 1000
 start_time <- Sys.time()
-chain <- run_ABC(c(P_hosp,P_ICU_pre, P_Hd, P_ICUd, P_ICU_Postd),num_iter)
+chain <- run_ABC(input, c(P_hosp,P_ICU_pre, P_Hd, P_ICUd, P_ICU_Postd),num_iter)
 end_time <- Sys.time()
 
 print(end_time - start_time)
-```
-
-
-```{r}
-hist(chain[1:num_iter, 1], nclass=30, main="Posterior of P_hosp")
-hist(chain[1:num_iter, 2], nclass=30, main="Posterior of P_ICU_pre")
-hist(chain[1:num_iter, 3], nclass=30, main="Posterior of P_Hd")
-hist(chain[1:num_iter, 4], nclass=30, main="Posterior of P_ICUd")
-hist(chain[1:num_iter, 5], nclass=30, main="Posterior of P_ICU_Postd")
-```
-# Obtain new transition parameters
-```{r}
-new_Ph = chain[num_iter,1]
-new_PICUpre = chain[num_iter,2]
-new_PHd = chain[num_iter,3]
-new_PICUd = chain[num_iter,4]
-new_PICUpd = chain[num_iter,5]
-
-print(new_Ph)
-print(new_PICUpre)
-print(new_PHd)
-print(new_PICUd)
-print(new_PICUpd)
-```
-
-# Visualization
-```{r}
-new_ward_simulation = ward_simulation(new_Ph, new_PICUpre, new_PHd)
-new_icu_simulation = icu_simulation(new_PICUd, new_PICUpd)
+saveRDS(chain, file="Output_Data/chain.RData")
 ```
 
 ```{r}
-new_hosp_simulation = 
-  new_ward_simulation[[1]] +
-  new_icu_simulation[[1]] +
-  new_icu_simulation[[2]] +
-  new_icu_simulation[[3]]
-```
-
-```{r}
-library(ggplot2)
-hosp$Date = as.Date(hosp$Date, format = c("%m-%d"))
-
-hosp_simulation <- data.frame(
-  date = hosp$Date,
-  sim = new_hosp_simulation
-)
-
-hosp_occupancy <- ggplot() + 
-  geom_line(data = hosp_simulation, aes(x = date, y = sim, color="simulation")) +
-  geom_line(data = hosp, aes(x = Date, y = VIC, color="data")) +
-  scale_colour_manual("", 
-                      breaks = c("simulation", "data"),
-                      values = c("blue", "black")) +
-  labs(x = "Date (Year: 2021)", title = "Hospital Occupancy Simulation (after inference) in VIC") +
-  scale_y_continuous("Hospital Occupancy", limits = c(0,900))
-hosp_occupancy
-```
-
-```{r}
-icu$Date = as.Date(icu$Date, format = c("%m-%d"))
-
-icu_simulation <- data.frame(
-  date = icu$Date,
-  sim = new_icu_simulation[[1]]
-)
-
-icu_occupancy <- ggplot() + 
-  geom_line(data = icu_simulation, aes(x = date, y = sim, color="simulation")) +
-  geom_line(data = icu, aes(x = Date, y = VIC, color="data")) +
-  scale_colour_manual("", 
-                      breaks = c("simulation", "data"),
-                      values = c("blue", "black")) +
-  labs(x = "Date (Year: 2021)", title = "ICU Occupancy Simulation (after inference) in VIC") +
-  scale_y_continuous("ICU Occupancy", limits = c(0,250))
-icu_occupancy
-```
-
-
-```{r}
-new_death_simulation = 
-  new_ward_simulation[[2]] +
-  new_icu_simulation[[4]] +
-  new_icu_simulation[[5]]
-```
-
-```{r}
-daily_death$Date = as.Date(daily_death$Date, format = c("%m-%d"))
-
-death_simulation <- data.frame(
-  date = daily_death$Date,
-  sim = new_death_simulation
-)
-
-daily_death_plot <- ggplot() + 
-  geom_line(data = death_simulation, aes(x = date, y = sim, color="simulation")) +
-  geom_line(data = daily_death, aes(x = Date, y = NSW, color="data")) +
-  scale_colour_manual("", 
-                      breaks = c("simulation", "data"),
-                      values = c("blue", "black")) +
-  labs(x = "Date (Year: 2021)", title = "Daily Death Simulation (after inference) in VIC") +
-  scale_y_continuous("Daily Deaths", limits = c(0,30))
-daily_death_plot
-```
-
-```{r}
-library(ggpubr)
-ggarrange(hosp_occupancy,icu_occupancy, daily_death_plot, 
-          ncol = 1, nrow = 3)
-ggsave("Plots/Simulation after inference in VIC.png")
+par(mfrow=c(3,2))
+hist(chain[1:num_iter, 1], main="Posterior of P_H", xlab="value")
+hist(chain[1:num_iter, 2], main="Posterior of P_ICU", xlab="value")
+hist(chain[1:num_iter, 3], main="Posterior of P_H_D", xlab="value")
+hist(chain[1:num_iter, 4], main="Posterior of P_ICU_D", xlab="value")
+hist(chain[1:num_iter, 5], main="Posterior of P_W_D", xlab="value")
 ```
 
