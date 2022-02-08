@@ -13,16 +13,16 @@ hosp <- read.csv(file = "Output_data/hosp_clean.csv")
 icu <- read.csv(file = "Output_data/icu_clean.csv")
 daily_death <- read.csv(file = "Output_data/daily_death.csv")
 
-hosp_states = hosp$VIC
-icu_states = icu$VIC
+hosp_states = hosp$NSW
+icu_states = icu$NSW
 ward_states = hosp_states - icu_states
-daily_death_states = daily_death$VIC
+daily_death_states = daily_death$NSW
 ```
 
 # Simulation
 ```{r}
 n_days = 300
-input <- cases$VIC
+input <- cases$NSW
 
 # bed occupancy of general wards
 ward_list <- as.list(rep(NA, length(input)))
@@ -222,9 +222,6 @@ icu_simulation <- function(input, P_hosp, P_ICU_pre, P_ICUd, P_ICU_Postd){
 # Inference 
 # Approximate Bayesian Computation 
 ```{r}
-#library(purrr)
-#library(coda)
-
 # thresholds
 ward_epsilon = 200
 ICU_epsilon = 60
@@ -239,6 +236,7 @@ ABC_acceptance <- function(input,par){
   if(par[3] <= 0 || par[3] > 1) return(F)
   if(par[4] <= 0 || par[4] > 1) return(F)
   if(par[5] <= 0 || par[5] > 1) return(F)
+  
   ward_sim = ward_simulation(input, par[1], par[2], par[3])
   icu_sim = icu_simulation(input, par[1], par[2], par[4], par[5])
   
@@ -278,7 +276,7 @@ run_ABC <- function(input, startvalue, iterations){
 
 ```{r}
 # Estimate the probability of getting into the hospital from general cases
-P_hosp = 0.08
+P_hosp = 0.12
 
 # Estimate the probability of getting into the Pre-ICU from general wards
 P_ICU_pre = 0.13
@@ -295,21 +293,21 @@ P_ICU_Postd = 0.1
 
 # Run ABC algorithm
 ```{r}
-num_iter = 1000
+num_iter = 100000
 start_time <- Sys.time()
 chain <- run_ABC(input, c(P_hosp,P_ICU_pre, P_Hd, P_ICUd, P_ICU_Postd),num_iter)
 end_time <- Sys.time()
 
 print(end_time - start_time)
-saveRDS(chain, file="Output_Data/chain.RData")
+saveRDS(chain, file="Output_Data/chain_1.RData")
 ```
 
+# Trace Plot
 ```{r}
-par(mfrow=c(3,2))
-hist(chain[1:num_iter, 1], main="Posterior of P_H", xlab="value")
-hist(chain[1:num_iter, 2], main="Posterior of P_ICU", xlab="value")
-hist(chain[1:num_iter, 3], main="Posterior of P_H_D", xlab="value")
-hist(chain[1:num_iter, 4], main="Posterior of P_ICU_D", xlab="value")
-hist(chain[1:num_iter, 5], main="Posterior of P_W_D", xlab="value")
+plot(1:num_iter, chain[1:num_iter,1], type="l", xlab="iteration", ylab="P_H", main="Trace Plot: P(hospital|cases)")
+plot(1:num_iter, chain[1:num_iter,2], type="l", xlab="iteration", ylab="P_ICU", main="Trace Plot: P(ICU|hospital)")
+plot(1:num_iter, chain[1:num_iter,3], type="l", xlab="iteration", ylab="P_H_D", main="Trace Plot: P(Death|general ward)" )
+plot(1:num_iter, chain[1:num_iter,4], type="l", xlab="iteration", ylab="P_ICU_D", main="Trace Plot: P(Death|ICU)")
+plot(1:num_iter, chain[1:num_iter,5], type="l", xlab="iteration", ylab="P_W_D", main="Trace Plot: P(Death|post-ICU)")
 ```
 

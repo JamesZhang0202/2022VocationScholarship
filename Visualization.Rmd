@@ -18,64 +18,124 @@ NSW <- cases$NSW
 ```
 
 ```{r}
-VIC_chain <- readRDS("Output_Data/VIC_chain.RData")
-NSW_chain <- readRDS("Output_Data/NSW_chain.RData")
+VIC_chain <- readRDS("Output_Data/chain.RData")
+NSW_chain <- readRDS("Output_Data/chain_1.RData")
 ```
 
 # Posterior Distributions
 ```{r}
-#png(file="Plots/posterior distributions.png")
-num_iter = 10000
+burnIn = 500
+num_iter = 100000
+#png(filename="Plots/Posterior Distributions.png")
 par(mfrow=c(3,2))
-hist(NSW_chain[1:num_iter, 1], main="Posterior of P_H", xlab="value")
-hist(NSW_chain[1:num_iter, 2], main="Posterior of P_ICU", xlab="value")
-hist(NSW_chain[1:num_iter, 3], main="Posterior of P_H_D", xlab="value")
-hist(NSW_chain[1:num_iter, 4], main="Posterior of P_ICU_D", xlab="value")
-hist(NSW_chain[1:num_iter, 5], main="Posterior of P_W_D", xlab="value")
-
+hist(VIC_chain[-(1:burnIn), 1], main="Posterior of P(Hospital|cases)", xlab="P_H", freq = FALSE)
+hist(VIC_chain[-(1:burnIn), 2], main="Posterior of P(ICU|Hospital)", xlab="P_ICU", freq = FALSE)
+hist(VIC_chain[-(1:burnIn), 3], main="Posterior of P(Death|General Ward)", xlab="P_H_D", freq = FALSE)
+hist(VIC_chain[-(1:burnIn), 4], main="Posterior of P(Death|ICU)", xlab="P_ICU_D", freq = FALSE)
+hist(VIC_chain[-(1:burnIn), 5], main="Posterior of P(Death|Post-ICU)", xlab="P_W_D", freq = FALSE)
 #dev.off()
 ```
 
-# Obtain new transition parameters
+# Random Sampling from the chain
 ```{r}
-VIC_Ph = VIC_chain[num_iter,1]
-VIC_PICUpre = VIC_chain[num_iter,2]
-VIC_PHd = VIC_chain[num_iter,3]
-VIC_PICUd = VIC_chain[num_iter,4]
-VIC_PICUpd = VIC_chain[num_iter,5]
+sample_num = 1000
+random_sample_VIC = VIC_chain[sample(1:num_iter, sample_num),]
+```
 
-NSW_Ph = NSW_chain[num_iter,1]
-NSW_PICUpre = NSW_chain[num_iter,2]
-NSW_PHd = NSW_chain[num_iter,3]
-NSW_PICUd = NSW_chain[num_iter,4]
-NSW_PICUpd = NSW_chain[num_iter,5]
+
+```{r}
+sample_num = 1000
+random_sample_NSW = NSW_chain[sample(1:10000, sample_num),]
+```
+
+
+# Extract the quantiles for the simulations
+```{r}
+getQuantile <- function(input, sample, sample_num){
+  hosp_simulation_list = as.list(rep(NA, sample_num))
+  icu_simulation_list = as.list(rep(NA, sample_num))
+  death_simulation_list = as.list(rep(NA, sample_num))
+
+  for(i in 1:sample_num){
+    Ph = sample[i,][1]
+    PICUpre = sample[i,][2]
+    Phd = sample[i,][3]
+    PICUd = sample[i,][4]
+    PICUpd = sample[i,][5]
+  
+    simulation_w = ward_simulation(input, Ph, PICUpre, Phd)
+    simulation_i = icu_simulation(input, Ph, PICUpre, PICUd, PICUpd)
+  
+    hosp_simu = simulation_w[[1]] + simulation_i[[1]] + simulation_i[[2]] + simulation_i[[3]]
+    icu_simu = simulation_i[[1]]
+    death_simu = simulation_w[[2]] + simulation_i[[4]] + simulation_i[[5]]
+  
+    hosp_simulation_list[[i]] = hosp_simu
+    icu_simulation_list[[i]] = icu_simu
+    death_simulation_list[[i]] = death_simu
+  }
+  
+  h_simu = hosp_simulation_list[[1]]
+  i_simu = icu_simulation_list[[1]]
+  d_simu = death_simulation_list[[1]]
+
+  for(i in 2:sample_num){
+    h_simu = cbind(h_simu, hosp_simulation_list[[i]])
+    i_simu = cbind(i_simu, icu_simulation_list[[i]])
+    d_simu = cbind(d_simu, death_simulation_list[[i]])
+  }
+  
+  h_simu_median = replicate(length(input), 0)
+  h_simu_5_quan = replicate(length(input), 0)
+  h_simu_95_quan = replicate(length(input), 0)
+  i_simu_median = replicate(length(input), 0)
+  i_simu_5_quan = replicate(length(input), 0)
+  i_simu_95_quan = replicate(length(input), 0)
+  d_simu_median = replicate(length(input), 0)
+  d_simu_5_quan = replicate(length(input), 0)
+  d_simu_95_quan = replicate(length(input), 0)
+
+  for(i in 1:length(input)){
+  
+    h_simu_median[i] = median(h_simu[i,])
+    h_simu_5_quan[i] = quantile(h_simu[i,],probs=0.05)
+    h_simu_95_quan[i] = quantile(h_simu[i,],probs=0.95)
+  
+    i_simu_median[i] = median(i_simu[i,])
+    i_simu_5_quan[i] = quantile(i_simu[i,],probs=0.05)
+    i_simu_95_quan[i] = quantile(i_simu[i,],probs=0.95)
+  
+    d_simu_median[i] = median(d_simu[i,])
+    d_simu_5_quan[i] = quantile(d_simu[i,],probs=0.05)
+    d_simu_95_quan[i] = quantile(d_simu[i,],probs=0.95)
+  }
+  
+  return(list(h_simu_median, h_simu_5_quan, h_simu_95_quan, 
+              i_simu_median, i_simu_5_quan, i_simu_95_quan, 
+              d_simu_median, d_simu_5_quan, d_simu_95_quan))
+}
+```
+
+
+```{r}
+start_time <- Sys.time()
+
+VIC_simu <- getQuantile(VIC, random_sample_VIC, sample_num)
+
+end_time <- Sys.time()
+print(end_time - start_time)
+```
+
+```{r}
+start_time <- Sys.time()
+
+NSW_simu <- getQuantile(NSW, random_sample_NSW, sample_num)
+
+end_time <- Sys.time()
+print(end_time - start_time)
 ```
 
 # Visualization
-```{r}
-
-VIC_ward_simulation = ward_simulation(VIC, VIC_Ph, VIC_PICUpre, VIC_PHd)
-VIC_icu_simulation = icu_simulation(VIC, VIC_Ph, VIC_PICUpre, VIC_PICUd, VIC_PICUpd)
-
-NSW_ward_simulation = ward_simulation(NSW, NSW_Ph, NSW_PICUpre, NSW_PHd)
-NSW_icu_simulation = icu_simulation(NSW, NSW_Ph, NSW_PICUpre, NSW_PICUd, NSW_PICUpd)
-```
-
-
-```{r}
-VIC_hosp_simulation = 
-  VIC_ward_simulation[[1]] +
-  VIC_icu_simulation[[1]] +
-  VIC_icu_simulation[[2]] +
-  VIC_icu_simulation[[3]]
-
-NSW_hosp_simulation = 
-  NSW_ward_simulation[[1]] +
-  NSW_icu_simulation[[1]] +
-  NSW_icu_simulation[[2]] +
-  NSW_icu_simulation[[3]]
-```
-
 ```{r}
 library(ggplot2)
 ```
@@ -85,11 +145,11 @@ hosp$Date = as.Date(hosp$Date, format = c("%m-%d"))
 
 VIC_hosp_simulation <- data.frame(
   date = hosp$Date,
-  sim = VIC_hosp_simulation
+  sim = VIC_simu[[1]]
 )
 
 VIC_hosp_occupancy <- ggplot(VIC_hosp_simulation, aes(x = date, y = sim, color="simulation")) + 
-  geom_ribbon(aes(ymin=sim, ymax=sim+70), alpha=0.2) + 
+  geom_ribbon(aes(ymin=VIC_simu[[2]], ymax=VIC_simu[[3]]), alpha=0.2) + 
   geom_line(data = hosp, aes(x = Date, y = VIC, color="data")) +
   scale_colour_manual("", 
                       breaks = c("simulation", "data"),
@@ -101,13 +161,57 @@ VIC_hosp_occupancy
 ```
 
 ```{r}
+icu$Date = as.Date(icu$Date, format = c("%m-%d"))
+
+VIC_icu_simulation <- data.frame(
+  date = icu$Date,
+  sim = VIC_simu[[4]]
+)
+
+VIC_icu_occupancy <- ggplot(VIC_icu_simulation, aes(x = date, y = sim, color="simulation")) + 
+  geom_ribbon(aes(ymin=VIC_simu[[5]], ymax=VIC_simu[[6]]), alpha=0.2) + 
+  geom_line(data = icu, aes(x = Date, y = VIC, color="data")) +
+  scale_colour_manual("", 
+                      breaks = c("simulation", "data"),
+                      values = c("blue", "black")) +
+  labs(x = "Date (Year: 2021)", title = "ICU Occupancy Simulation in VIC") +
+  theme(plot.title = element_text(size=11)) +
+  scale_y_continuous("ICU Occupancy", limits = c(0,220))
+VIC_icu_occupancy
+```
+
+```{r}
+daily_death$Date = as.Date(daily_death$Date, format = c("%m-%d"))
+
+death_simulation_VIC <- data.frame(
+  date = daily_death$Date,
+  sim = VIC_simu[[7]]
+)
+
+VIC_daily_death_plot <- ggplot(data = death_simulation_VIC, aes(x = date, y = sim, color="simulation")) + 
+  geom_ribbon(aes(ymin=VIC_simu[[8]], ymax=VIC_simu[[9]]), alpha=0.2) +
+  geom_line(data = daily_death, aes(x = Date, y = VIC, color="data")) +
+  scale_colour_manual("", 
+                      breaks = c("simulation", "data"),
+                      values = c("blue", "black")) +
+  labs(x = "Date (Year: 2021)", title = "Daily Death Simulation in VIC") +
+  theme(plot.title = element_text(size=11)) +
+  scale_y_continuous("Daily Deaths", limits = c(0,35))
+VIC_daily_death_plot
+```
+
+
+
+```{r}
+hosp$Date = as.Date(hosp$Date, format = c("%m-%d"))
+
 NSW_hosp_simulation <- data.frame(
   date = hosp$Date,
-  sim = NSW_hosp_simulation
+  sim = NSW_simu[[1]]
 )
 
 NSW_hosp_occupancy <- ggplot(NSW_hosp_simulation, aes(x = date, y = sim, color="simulation")) + 
-  geom_ribbon(aes(ymin=sim, ymax=sim+180), alpha=0.2) + 
+  geom_ribbon(aes(ymin=NSW_simu[[2]], ymax=NSW_simu[[3]]), alpha=0.2) + 
   geom_line(data = hosp, aes(x = Date, y = NSW, color="data")) +
   scale_colour_manual("", 
                       breaks = c("simulation", "data"),
@@ -118,96 +222,53 @@ NSW_hosp_occupancy <- ggplot(NSW_hosp_simulation, aes(x = date, y = sim, color="
 NSW_hosp_occupancy
 ```
 
+
 ```{r}
 icu$Date = as.Date(icu$Date, format = c("%m-%d"))
 
-VIC_icu_simulation <- data.frame(
-  date = icu$Date,
-  sim = VIC_icu_simulation[[1]]
-)
-
-VIC_icu_occupancy <- ggplot(VIC_icu_simulation, aes(x = date, y = sim, color="simulation")) + 
-  geom_ribbon(aes(ymin=sim, ymax=sim+30), alpha=0.2) + 
-  geom_line(data = icu, aes(x = Date, y = VIC, color="data")) +
-  scale_colour_manual("", 
-                      breaks = c("simulation", "data"),
-                      values = c("blue", "black")) +
-  labs(x = "Date (Year: 2021)", title = "ICU Occupancy Simulation in VIC") +
-  theme(plot.title = element_text(size=11)) +
-  scale_y_continuous("ICU Occupancy", limits = c(0,270))
-VIC_icu_occupancy
-```
-
-```{r}
 NSW_icu_simulation <- data.frame(
   date = icu$Date,
-  sim = NSW_icu_simulation[[1]]
+  sim = NSW_simu[[4]]
 )
 
 NSW_icu_occupancy <- ggplot(NSW_icu_simulation, aes(x = date, y = sim, color="simulation")) + 
-  geom_ribbon(aes(ymin=sim, ymax=sim+30), alpha=0.2) + 
+  geom_ribbon(aes(ymin=NSW_simu[[5]], ymax=NSW_simu[[6]]), alpha=0.2) + 
   geom_line(data = icu, aes(x = Date, y = NSW, color="data")) +
   scale_colour_manual("", 
                       breaks = c("simulation", "data"),
                       values = c("blue", "black")) +
   labs(x = "Date (Year: 2021)", title = "ICU Occupancy Simulation in NSW") +
   theme(plot.title = element_text(size=11)) +
-  scale_y_continuous("ICU Occupancy", limits = c(0,300))
+  scale_y_continuous("ICU Occupancy", limits = c(0,320))
 NSW_icu_occupancy
 ```
 
-```{r}
-VIC_death_simulation = 
-  VIC_ward_simulation[[2]] +
-  VIC_icu_simulation[[4]] +
-  VIC_icu_simulation[[5]]
-
-NSW_death_simulation = 
-  NSW_ward_simulation[[2]] +
-  NSW_icu_simulation[[4]] +
-  NSW_icu_simulation[[5]]
-```
 
 ```{r}
 daily_death$Date = as.Date(daily_death$Date, format = c("%m-%d"))
 
-death_simulation_VIC <- data.frame(
-  date = daily_death$Date,
-  sim = VIC_death_simulation
-)
-
-VIC_daily_death_plot <- ggplot(data = death_simulation_VIC, aes(x = date, y = sim, color="simulation")) + 
-  geom_ribbon(aes(ymin=sim, ymax=sim+3), alpha=0.2) +
-  geom_line(data = daily_death, aes(x = Date, y = VIC, color="data")) +
-  scale_colour_manual("", 
-                      breaks = c("simulation", "data"),
-                      values = c("blue", "black")) +
-  labs(x = "Date (Year: 2021)", title = "Daily Death Simulation in VIC") +
-  theme(plot.title = element_text(size=11)) +
-  scale_y_continuous("Daily Deaths", limits = c(0,30))
-VIC_daily_death_plot
-```
-
-```{r}
 death_simulation_NSW <- data.frame(
   date = daily_death$Date,
-  sim = NSW_death_simulation
+  sim = NSW_simu[[7]]
 )
 
 NSW_daily_death_plot <- ggplot(data = death_simulation_NSW, aes(x = date, y = sim, color="simulation")) + 
-  geom_ribbon(aes(ymin=sim, ymax=sim+3), alpha=0.2) +
+  geom_ribbon(aes(ymin=NSW_simu[[8]], ymax=NSW_simu[[9]]), alpha=0.2) +
   geom_line(data = daily_death, aes(x = Date, y = NSW, color="data")) +
   scale_colour_manual("", 
                       breaks = c("simulation", "data"),
                       values = c("blue", "black")) +
   labs(x = "Date (Year: 2021)", title = "Daily Death Simulation in NSW") +
   theme(plot.title = element_text(size=11)) +
-  scale_y_continuous("Daily Deaths", limits = c(0,40))
+  scale_y_continuous("Daily Deaths", limits = c(0,30))
 NSW_daily_death_plot
 ```
 
 ```{r}
 library(ggpubr)
-ggarrange(VIC_hosp_occupancy,NSW_hosp_occupancy, VIC_icu_occupancy, NSW_icu_occupancy, VIC_daily_death_plot, NSW_daily_death_plot, ncol = 2, nrow = 3) 
+ggarrange(VIC_hosp_occupancy,NSW_hosp_occupancy, 
+          VIC_icu_occupancy, NSW_icu_occupancy, 
+          VIC_daily_death_plot, NSW_daily_death_plot, 
+          ncol = 2, nrow = 3) 
 ggsave("Plots/Simulation after inference.png")
 ```
