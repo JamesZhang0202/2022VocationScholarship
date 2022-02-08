@@ -26,14 +26,14 @@ NSW_chain <- readRDS("Output_Data/chain_1.RData")
 ```{r}
 burnIn = 500
 num_iter = 100000
-#png(filename="Plots/Posterior Distributions.png")
+png(filename="Plots/Posterior Distributions.png")
 par(mfrow=c(3,2))
-hist(VIC_chain[-(1:burnIn), 1], main="Posterior of P(Hospital|cases)", xlab="P_H", freq = FALSE)
+hist(VIC_chain[-(1:burnIn), 1], main="Posterior of P(Hospital|Cases)", xlab="P_H", freq = FALSE)
 hist(VIC_chain[-(1:burnIn), 2], main="Posterior of P(ICU|Hospital)", xlab="P_ICU", freq = FALSE)
 hist(VIC_chain[-(1:burnIn), 3], main="Posterior of P(Death|General Ward)", xlab="P_H_D", freq = FALSE)
 hist(VIC_chain[-(1:burnIn), 4], main="Posterior of P(Death|ICU)", xlab="P_ICU_D", freq = FALSE)
 hist(VIC_chain[-(1:burnIn), 5], main="Posterior of P(Death|Post-ICU)", xlab="P_W_D", freq = FALSE)
-#dev.off()
+dev.off()
 ```
 
 # Random Sampling from the chain
@@ -45,7 +45,7 @@ random_sample_VIC = VIC_chain[sample(1:num_iter, sample_num),]
 
 ```{r}
 sample_num = 1000
-random_sample_NSW = NSW_chain[sample(1:10000, sample_num),]
+random_sample_NSW = NSW_chain[sample(1:num_iter, sample_num),]
 ```
 
 
@@ -260,7 +260,7 @@ NSW_daily_death_plot <- ggplot(data = death_simulation_NSW, aes(x = date, y = si
                       values = c("blue", "black")) +
   labs(x = "Date (Year: 2021)", title = "Daily Death Simulation in NSW") +
   theme(plot.title = element_text(size=11)) +
-  scale_y_continuous("Daily Deaths", limits = c(0,30))
+  scale_y_continuous("Daily Deaths", limits = c(0,25))
 NSW_daily_death_plot
 ```
 
