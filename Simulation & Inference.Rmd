@@ -254,7 +254,7 @@ ABC_acceptance <- function(input,par){
 }
 
 
-# ABC rejection sampling
+# Simplified ABC-MCMC algorithm
 run_ABC <- function(input, startvalue, iterations){
   chain = array(dim = c(iterations+1,5))
   chain[1,] = startvalue
